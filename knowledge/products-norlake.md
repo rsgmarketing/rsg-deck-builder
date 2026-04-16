@@ -70,7 +70,7 @@ Patented self-contained refrigeration system using R-290 natural refrigerant. Pr
 
 **Footprint vs. Legacy:** Up to 28% shorter, up to 20% narrower.
 
-**Energy Savings (Verified — Subway/Budderfly study):**
+**Energy Savings (Verified — independent third-party study):**
 
 | Metric | Legacy R-404A | Capsule Pak ECO | Savings |
 |---|---|---|---|
@@ -82,7 +82,7 @@ Patented self-contained refrigeration system using R-290 natural refrigerant. Pr
 - R-290 GWP of 3 vs. R-404A GWP of 3,922 — 99.9% reduction in global warming potential.
 - Patented design (U.S. Patent No. 11,859,885) with exclusive latching system.
 - RSG transitioned to R-290 self-contained systems nearly 3 years ahead of AIM Act deadline.
-- Outdoor models include heater that prevents freezing in low ambient conditions (patent pending).
+- Outdoor models include heater that prevents freezing in low ambient conditions.
 
 **IMPORTANT LIMITATION:** Self-contained systems limited to 1.75 HP maximum. Do NOT position R-290 as suitable for all walk-in applications. Larger installations require Split-Pak remote systems.
 

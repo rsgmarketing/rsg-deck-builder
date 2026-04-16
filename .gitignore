@@ -1,0 +1,16 @@
+# Generated decks (output, not source)
+*.pptx
+!examples/*.pptx
+
+# QA wireframes (generated during review)
+*_wireframe.png
+qa_wireframes/
+slide_*.png
+
+# Generator scripts (per-deck, not reusable)
+generate_*.py
+qa_*.py
+
+# Python
+__pycache__/
+*.pyc

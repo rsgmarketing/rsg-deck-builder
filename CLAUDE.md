@@ -248,7 +248,6 @@ Read these on-demand, not all at once:
 | `knowledge/products-norlake.md` | When deck involves Norlake product specs or proof points |
 | `knowledge/products-masterbilt.md` | When deck involves Master-Bilt product specs |
 | `knowledge/products-regulatory.md` | When deck involves AIM Act, R-290, compliance topics |
-| `knowledge/competitive-landscape.md` | When deck needs competitive positioning or win themes |
 | `knowledge/personas.md` | When you need to tune tone for a specific audience |
 | `examples/generate-deck-reference.py` | To see a production-quality python-pptx script |
 | `examples/Fast-Trak-Strategy-Reference.pptx` | To show the user what "good" looks like |

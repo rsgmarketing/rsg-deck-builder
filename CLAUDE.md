@@ -249,7 +249,7 @@ After the generator script saves the .pptx, immediately run a second script that
 
 ### QA Script Template
 
-After the main generator script, always run this:
+After the main generator script, always run this. It does three things: measures text overflow, checks bounds, and renders wireframes for visual review.
 
 ```python
 from pptx import Presentation
@@ -257,32 +257,63 @@ from pptx.util import Inches, Emu
 from PIL import Image, ImageDraw, ImageFont
 import os
 
+# Character width estimates (inches per character) by font size range
+# These are conservative — they assume wider characters to catch overflow
+DISPLAY_CHAR_WIDTH = {  # Teko, Bebas Neue (condensed)
+    (44, 99): 0.38,   # 44-56pt stat numbers
+    (36, 43): 0.28,   # 36-43pt section openers
+    (28, 35): 0.22,   # 28-35pt BLUF headlines
+    (20, 27): 0.16,   # 20-27pt card titles
+    (14, 19): 0.12,   # 14-19pt subtitles
+}
+BODY_CHAR_WIDTH = {     # Segoe UI, Trade Gothic (proportional)
+    (12, 99): 0.09,
+    (10, 11): 0.075,
+    (8, 9): 0.06,
+    (1, 7): 0.05,
+}
+
+def estimate_text_width(text, font_size_pt, is_display_font):
+    """Estimate rendered text width in inches."""
+    table = DISPLAY_CHAR_WIDTH if is_display_font else BODY_CHAR_WIDTH
+    for (lo, hi), width_per_char in table.items():
+        if lo <= font_size_pt <= hi:
+            return len(text) * width_per_char
+    return len(text) * 0.1  # fallback
+
 def qa_deck(pptx_path):
-    """Visual QA: bounds check + wireframe render for every slide."""
+    """Full QA: text overflow, bounds check, wireframe render."""
     prs = Presentation(pptx_path)
     issues = []
     wireframes = []
 
-    # Scale: 1333x750 canvas represents 13.333" x 7.5"
     SCALE = 100  # pixels per inch
     W, H = 1333, 750
-    SAFETY_Y = 650  # 6.5" in pixels
+    SAFETY_Y = 650  # 6.5"
+
+    # Try to load fonts for wireframe rendering
+    fonts = {}
+    for size in [8, 10, 11, 12, 14, 18, 22, 28, 32, 40, 48, 56]:
+        try:
+            fonts[size] = ImageFont.truetype("C:/Windows/Fonts/segoeui.ttf", size)
+        except:
+            fonts[size] = ImageFont.load_default()
 
     for slide_idx, slide in enumerate(prs.slides):
-        # Create wireframe canvas
         img = Image.new('RGB', (W, H), (255, 255, 255))
         draw = ImageDraw.Draw(img)
-
         shapes_data = []
+
         for shape in slide.shapes:
-            x = int(shape.left / 914400 * SCALE)
-            y = int(shape.top / 914400 * SCALE)
-            w = int(shape.width / 914400 * SCALE)
-            h = int(shape.height / 914400 * SCALE)
+            x_in = shape.left / 914400
+            y_in = shape.top / 914400
+            w_in = shape.width / 914400
+            h_in = shape.height / 914400
+            x, y, w, h = int(x_in*SCALE), int(y_in*SCALE), int(w_in*SCALE), int(h_in*SCALE)
             shapes_data.append((x, y, w, h, shape))
 
-            # Draw shape fill
-            fill_color = (220, 220, 220)  # default gray
+            # --- Draw shape ---
+            fill_color = (235, 235, 235)
             try:
                 if shape.fill and shape.fill.fore_color:
                     rgb = shape.fill.fore_color.rgb
@@ -291,92 +322,113 @@ def qa_deck(pptx_path):
                 pass
 
             if hasattr(shape, 'image'):
-                # Image placeholder — draw with blue border
-                draw.rectangle([x, y, x + w, y + h], outline=(43, 124, 204), width=2)
-                draw.text((x + 4, y + 4), '[IMG]', fill=(43, 124, 204))
+                draw.rectangle([x, y, x+w, y+h], outline=(43, 124, 204), width=2)
+                fnt = fonts.get(10, ImageFont.load_default())
+                draw.text((x+4, y+4), f'[IMG {w_in:.1f}x{h_in:.1f}]', fill=(43, 124, 204), font=fnt)
             else:
-                draw.rectangle([x, y, x + w, y + h], fill=fill_color, outline=(180, 180, 180))
+                draw.rectangle([x, y, x+w, y+h], fill=fill_color, outline=(180, 180, 180))
 
-            # Draw text content
+            # --- Text overflow check ---
             if shape.has_text_frame:
-                text = shape.text_frame.text[:100]
-                if text.strip():
-                    # Estimate if text fits
-                    font_size = 10
+                for p in shape.text_frame.paragraphs:
+                    p_text = p.text.strip()
+                    if not p_text:
+                        continue
+                    font_size_pt = 12  # default
+                    font_name = ""
                     try:
-                        for p in shape.text_frame.paragraphs:
-                            if p.runs:
-                                font_size = int(p.runs[0].font.size / 12700) if p.runs[0].font.size else 10
-                                break
+                        if p.runs and p.runs[0].font.size:
+                            font_size_pt = int(p.runs[0].font.size / 12700)
+                        if p.runs and p.runs[0].font.name:
+                            font_name = p.runs[0].font.name
                     except:
                         pass
 
-                    text_color = (44, 62, 80)
+                    is_display = any(f in font_name.lower() for f in ['teko', 'bebas'])
+                    est_width = estimate_text_width(p_text, font_size_pt, is_display)
+
+                    if est_width > w_in + 0.2:  # 0.2" tolerance
+                        issues.append(
+                            f"Slide {slide_idx+1}: TEXT OVERFLOW — \"{p_text[:50]}...\" "
+                            f"at {font_size_pt}pt is ~{est_width:.1f}\" wide but box is {w_in:.1f}\" "
+                            f"({len(p_text)} chars, need {int(w_in / (est_width/len(p_text)))} max)"
+                        )
+
+                # Draw text in wireframe
+                full_text = shape.text_frame.text[:80]
+                if full_text.strip():
+                    render_size = min(max(8, font_size_pt), 48)
+                    closest = min(fonts.keys(), key=lambda s: abs(s - render_size))
+                    fnt = fonts[closest]
+                    # Determine text color
+                    tc = (44, 62, 80)
                     try:
                         for p in shape.text_frame.paragraphs:
                             if p.runs and p.runs[0].font.color and p.runs[0].font.color.rgb:
                                 rgb = p.runs[0].font.color.rgb
-                                text_color = (rgb[0], rgb[1], rgb[2])
+                                tc = (rgb[0], rgb[1], rgb[2])
                                 break
                     except:
                         pass
+                    # Clip text to box width
+                    draw.text((x+4, y+2), full_text[:int(w/7)+1], fill=tc, font=fnt)
 
-                    # Draw text (approximate)
-                    try:
-                        fnt = ImageFont.truetype("segoeui.ttf", max(8, min(font_size, 36)))
-                    except:
-                        fnt = ImageFont.load_default()
-                    draw.text((x + 4, y + 4), text[:60], fill=text_color, font=fnt)
+            # --- Bounds check ---
+            bottom_in = y_in + h_in
+            if bottom_in > 6.5 and y_in < 6.5:
+                issues.append(
+                    f"Slide {slide_idx+1}: SAFETY LINE — shape at y={y_in:.1f}\" "
+                    f"extends to {bottom_in:.1f}\" (crosses 6.5\")"
+                )
+                draw.rectangle([x, y, x+w, y+h], outline=(255, 0, 0), width=3)
 
-            # --- BOUNDS CHECKS ---
-            bottom = y + h
-            if bottom > SAFETY_Y and y < SAFETY_Y:
-                # Content crosses into footer zone
-                issues.append(f"Slide {slide_idx + 1}: Shape at y={y/SCALE:.1f}\" extends to {bottom/SCALE:.1f}\" (below 6.5\" safety line)")
-                draw.rectangle([x, y, x + w, y + h], outline=(255, 0, 0), width=3)
+            # --- Image size check ---
+            if hasattr(shape, 'image'):
+                if w_in > 4.5 and h_in > 0.8:  # skip logos
+                    if w_in > 4.0 or h_in > 3.5:
+                        issues.append(
+                            f"Slide {slide_idx+1}: OVERSIZED IMAGE — {w_in:.1f}x{h_in:.1f}\" "
+                            f"(max recommended: 4.0x3.0\")"
+                        )
 
-        # Check for overlaps between non-background shapes
+        # Overlap check (skip full-width backgrounds)
         for i in range(len(shapes_data)):
-            for j in range(i + 1, len(shapes_data)):
-                x1, y1, w1, h1, s1 = shapes_data[i]
-                x2, y2, w2, h2, s2 = shapes_data[j]
-                # Skip full-slide backgrounds
-                if w1 > W * 0.9 or w2 > W * 0.9:
+            for j in range(i+1, len(shapes_data)):
+                x1,y1,w1,h1,_ = shapes_data[i]
+                x2,y2,w2,h2,_ = shapes_data[j]
+                if w1 > W*0.9 or w2 > W*0.9:
                     continue
-                # Check overlap
-                if (x1 < x2 + w2 and x1 + w1 > x2 and y1 < y2 + h2 and y1 + h1 > y2):
-                    overlap_area = (min(x1+w1, x2+w2) - max(x1, x2)) * (min(y1+h1, y2+h2) - max(y1, y2))
-                    if overlap_area > 200:  # ignore tiny overlaps
-                        issues.append(f"Slide {slide_idx + 1}: Overlap detected between shapes at ({x1/SCALE:.1f}\",{y1/SCALE:.1f}\") and ({x2/SCALE:.1f}\",{y2/SCALE:.1f}\")")
+                if (x1 < x2+w2 and x1+w1 > x2 and y1 < y2+h2 and y1+h1 > y2):
+                    overlap = (min(x1+w1,x2+w2)-max(x1,x2)) * (min(y1+h1,y2+h2)-max(y1,y2))
+                    if overlap > 200:
+                        issues.append(f"Slide {slide_idx+1}: OVERLAP at ({x1/SCALE:.1f}\",{y1/SCALE:.1f}\") and ({x2/SCALE:.1f}\",{y2/SCALE:.1f}\")")
 
-        # Draw safety line
+        # Safety line + slide number
         draw.line([(0, SAFETY_Y), (W, SAFETY_Y)], fill=(255, 0, 0), width=2)
-        draw.text((W - 120, SAFETY_Y - 15), "6.5\" SAFETY", fill=(255, 0, 0))
+        draw.text((W-130, SAFETY_Y-15), "6.5\" SAFETY", fill=(255, 0, 0), font=fonts.get(10))
+        draw.text((10, H-20), f"Slide {slide_idx+1}", fill=(100, 100, 100), font=fonts.get(10))
 
-        # Draw slide number
-        draw.text((10, H - 20), f"Slide {slide_idx + 1}", fill=(100, 100, 100))
-
-        wireframe_path = f"slide_{slide_idx + 1}_wireframe.png"
-        img.save(wireframe_path)
-        wireframes.append(wireframe_path)
+        path = f"slide_{slide_idx+1}_wireframe.png"
+        img.save(path)
+        wireframes.append(path)
 
     return issues, wireframes
 
-# Run QA
 issues, wireframes = qa_deck("OUTPUT_FILE.pptx")
-
 if issues:
-    print("=== ISSUES FOUND ===")
+    print(f"=== {len(issues)} ISSUES FOUND ===")
     for issue in issues:
         print(f"  - {issue}")
 else:
-    print("=== NO ISSUES FOUND ===")
-
-print(f"\nWireframes saved: {', '.join(wireframes)}")
-print("Review each wireframe image before delivering the deck.")
+    print("=== ALL CLEAR ===")
+print(f"Wireframes: {', '.join(wireframes)}")
 ```
 
-Replace `"OUTPUT_FILE.pptx"` with the actual output path. After running, read each wireframe image and verify the layout is clean.
+Replace `"OUTPUT_FILE.pptx"` with the actual output path. After running:
+
+1. **Read the issues list** — fix every TEXT OVERFLOW, SAFETY LINE, OVERSIZED IMAGE, and OVERLAP issue
+2. **Read each wireframe image** — verify that text fits inside boxes, cards look balanced, and nothing is visually off
+3. **Regenerate and re-run QA** until the issues list is empty AND the wireframes look clean
 
 ### After QA Passes
 
@@ -427,13 +479,32 @@ Read these on-demand, not all at once:
 - Explicit font sizes — never auto-shrink
 - Check os.path.exists() before every image insert
 - Use blank slide layout (layout index 6) — never use template placeholders
+- **Respect character budgets from design-system.md** — if text exceeds the budget, shorten the text or reduce the font size
+- **Run visual QA before every delivery** — never hand the user a deck you haven't verified
+
+### Text Sizing Rules (Critical)
+
+These rules prevent the #1 problem: text overflow and wrapping.
+
+- **BLUF headlines: 28-32pt display font, max 50 characters.** If your headline is longer, shorten it. Do not use 36-48pt for headlines — those sizes are for section openers (which have fewer words).
+- **Section opener titles: 40-48pt, max 30 characters.** These are short, punchy lines like "WHY IN-HOUSE REFRIGERATION."
+- **Stat numbers: 44-56pt, max 7 characters.** "14,000+" fits. "~50% ENERGY SAVINGS" does NOT — that's a card title, not a stat.
+- **Card titles: 18-22pt, max 20 characters.** Short labels like "No Mechanical Room" or "FAST-TRAK."
+- **Body text and bullets: 10-12pt.** Never larger. Max line width 5.5" for side-by-side layouts, 10" for full-width.
+- **Product images: max 4.0" wide, max 3.0" tall** on content slides. Images should complement text, not dominate the slide.
+
+### Centering and Positioning
+- **Text inside cards MUST be positioned relative to the card bounds**, not at absolute slide coordinates. Calculate: `text_x = card_x + padding`, `text_w = card_w - (2 * padding)`.
+- **Centered elements**: calculate `x = (slide_width - element_width) / 2`.
+- **Even card spacing**: for N cards across, calculate `gap = (available_width - N * card_width) / (N + 1)`, then position each card at `margin + gap + i * (card_width + gap)`.
 
 ### Defensive Coding
 - Generous text box heights — better too tall than text gets cut off
-- Title text boxes: minimum Inches(0.6) height
-- Body text boxes: minimum Inches(0.4) per expected line of text
+- Title text boxes: minimum Inches(0.5) height for 28-32pt
+- Body text boxes: minimum Inches(0.3) per expected line of text
 - Always set word_wrap = True on text frames
 - Footer at y=6.8" with 0.7" height — leaves 6.8" for content (round down to 6.5" for safety)
+- **Count characters before setting font size.** If the text is too long for the size, reduce size first — don't hope it fits.
 
 ### What NOT to Do
 - Don't auto-shrink text to fit — set explicit sizes
@@ -444,3 +515,6 @@ Read these on-demand, not all at once:
 - Don't add animations or transitions (python-pptx doesn't support them well)
 - Don't generate speaker notes unless the user asks
 - Don't make the user read or edit Python — they describe changes in plain English
+- Don't use absolute coordinates for text inside cards — always calculate relative to the card
+- Don't use 36pt+ for BLUF headlines — use 28-32pt. Reserve 40pt+ for section openers only
+- Don't make images larger than 4" wide on content slides

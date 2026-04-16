@@ -87,22 +87,38 @@ FONT_BODY = 'Trade Gothic Next'    # Body text (fallback: 'Segoe UI')
 
 **Font installation warning:** If Teko or Trade Gothic Next are not installed on the machine that opens the PPTX, PowerPoint will substitute Arial/Calibri and all spacing will break. When in doubt, use the RSG Corporate fonts (Bebas Neue / Segoe UI) — they are universally available.
 
-### Font Size Rules
+### Font Sizes and Character Budgets
 
-| Element | Display Font Size | Body Font Size |
-|---|---|---|
-| Slide title (BLUF headline) | 36-48 pt | — |
-| Section opener title | 48-56 pt | — |
-| Subtitle / tagline | — | 18-24 pt |
-| Body text | — | 12-14 pt |
-| Bullet points | — | 11-13 pt |
-| Stat callout (large number) | 56-72 pt | — |
-| Stat label | — | 10-12 pt |
-| Footer text | — | 8-9 pt |
-| Owner badge text | — | 8-9 pt |
-| Table cell | — | 9-11 pt |
+Font sizes MUST be paired with character limits. python-pptx cannot detect overflow — you must prevent it by design.
 
-**Never use auto-shrink.** python-pptx does not render text — it cannot detect overflow. Set explicit sizes and test.
+**Approximate character widths (condensed display fonts like Teko/Bebas Neue):**
+- 56pt: ~0.35" per character
+- 40pt: ~0.25" per character
+- 28pt: ~0.18" per character
+- 24pt: ~0.15" per character
+
+**Approximate character widths (body fonts like Segoe UI/Trade Gothic):**
+- 14pt: ~0.09" per character
+- 12pt: ~0.08" per character
+- 11pt: ~0.07" per character
+
+| Element | Font | Size | Max Width | Max Characters | Box Height |
+|---|---|---|---|---|---|
+| BLUF headline | Display | 28-32 pt | 10.0" | 50 chars at 30pt | 0.6" |
+| Section opener title | Display | 40-48 pt | 11.0" | 30 chars at 44pt | 0.8" |
+| Subtitle / tagline | Body | 16-18 pt | 10.0" | 70 chars | 0.5" |
+| Body text | Body | 11-12 pt | 5.5" | — | 0.35" per line |
+| Bullet points | Body | 10-11 pt | 5.5" | 80 chars per bullet | 0.3" per line |
+| Stat number | Display | 44-56 pt | 2.5" | 7 chars max | 0.8" |
+| Stat label | Body | 10-11 pt | 2.5" | 25 chars per line | 0.25" per line |
+| Card title | Display | 18-22 pt | card width - 0.4" | 20 chars at 20pt | 0.4" |
+| Card body | Body | 10-11 pt | card width - 0.4" | — | 0.25" per line |
+| Footer text | Body | 8 pt | 5.0" | — | 0.3" |
+| Callout box title | Body | 9-10 pt, bold | box width - 0.4" | — | 0.3" |
+
+**Critical: If your headline text exceeds the character budget, either shorten the text or reduce the font size. Never squeeze longer text into a smaller box.**
+
+**Never use auto-shrink.** python-pptx does not render text — it cannot detect overflow. Prevent overflow at generation time using these budgets.
 
 ---
 
@@ -134,11 +150,49 @@ MARGIN_TOP = Inches(0.6)
 CONTENT_WIDTH = Inches(11.833)   # 13.333 - 0.75 - 0.75
 ```
 
+### Image Sizing
+
+Product images should support the content, not dominate the slide.
+
+| Context | Max Width | Max Height | Typical Placement |
+|---|---|---|---|
+| Hero image (title slide) | 4.0" | 3.5" | Right side, vertically centered |
+| Product image (content slide) | 4.0" | 3.0" | Right side, next to text |
+| Card inline image | card width - 0.4" | 2.0" | Inside card below text |
+| Background/atmosphere | 13.333" | 7.5" | Full bleed behind overlay |
+
+**Never let an image push content down or create dead space.** If text + image don't fit side-by-side, stack them with the image below at reduced size.
+
+### Centering and Alignment Within Cards
+
+When placing text inside a card or container:
+
+```python
+# Card bounds
+card_x, card_y, card_w, card_h = Inches(0.8), Inches(1.5), Inches(3.6), Inches(3.0)
+
+# Text MUST be inset from card edges (padding)
+padding = Inches(0.2)
+text_x = card_x + padding
+text_y = card_y + padding  # plus space for accent bar if present
+text_w = card_w - (padding * 2)
+```
+
+**Never use absolute x/y for text inside cards.** Always calculate position relative to the card's bounds. This ensures text stays centered and doesn't spill outside the card.
+
+For horizontally centered text:
+```python
+# Center a text box within the slide
+text_w = Inches(8)
+text_x = (Inches(13.333) - text_w) / 2
+```
+
 ### Logo Placement
 
-- **Title slides:** Centered or top-left, width 3-4 inches
-- **Content slides:** Top-right corner, width 2-2.5 inches
-- **Footer:** Small logo (1.5" wide) bottom-right, paired with footer text bottom-left
+- **Title slides:** Bottom-left or centered, width 2.5-3 inches
+- **Content slides:** NOT on content slides (logo is in the footer)
+- **Footer:** Small logo (1.5-2" wide) bottom-right, paired with footer text bottom-left
+- **Section dividers:** Centered bottom, width 2-2.5 inches
 
 ### Footer Convention
 
